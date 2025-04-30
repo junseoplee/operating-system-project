@@ -1,0 +1,3 @@
+/Users/junseop/Documents/study/os-project/cmake-build-debug/CMakeFiles/os_project.dir
+/Users/junseop/Documents/study/os-project/cmake-build-debug/CMakeFiles/edit_cache.dir
+/Users/junseop/Documents/study/os-project/cmake-build-debug/CMakeFiles/rebuild_cache.dir
