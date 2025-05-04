@@ -3,6 +3,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
 #include "compress.h"
 
@@ -20,11 +22,20 @@ void* compress_thread_func(void* arg) {
     return NULL;
 }
 
+double get_time_diff(struct timeval start, struct timeval end) {
+    return (end.tv_sec - start.tv_sec) + (end.tv_usec - start.tv_usec) / 1000000.0;
+}
+
 int main(int argc, char* argv[]) {
     if (argc != 3) {
         fprintf(stderr, "사용법: %s <입력파일> <출력파일>\n", argv[0]);
         return 1;
     }
+
+    struct timeval start_time, end_time;
+    struct rusage usage;
+
+    gettimeofday(&start_time, NULL);  // 시작 시간 측정
 
     FILE* in = fopen(argv[1], "r");
     if (!in) {
@@ -38,7 +49,7 @@ int main(int argc, char* argv[]) {
     fclose(in);
 
     pid_t pid = fork();
-    if (pid == 0) { // child process
+    if (pid == 0) { // 자식 프로세스
         pthread_t tid;
         CompressArgs args = { input, output };
         pthread_create(&tid, NULL, compress_thread_func, &args);
@@ -51,15 +62,21 @@ int main(int argc, char* argv[]) {
         }
         fwrite(output, sizeof(char), strlen(output), out);
         fclose(out);
-        printf("[Child] 압축 완료\n");
         exit(0);
     } else if (pid > 0) {
         wait(NULL);
-        printf("[Parent] 자식 프로세스 종료 대기 완료\n");
     } else {
         perror("fork 실패");
         return 1;
     }
+
+    gettimeofday(&end_time, NULL); // 종료 시간 측정
+    getrusage(RUSAGE_SELF, &usage); // context switch 측정
+
+    printf("\n=== 내부 성능 측정 결과 ===\n");
+    printf("총 실행 시간: %.6f초\n", get_time_diff(start_time, end_time));
+    printf("Voluntary Context Switches   : %ld\n", usage.ru_nvcsw);
+    printf("Involuntary Context Switches : %ld\n", usage.ru_nivcsw);
 
     free(input);
     free(output);
