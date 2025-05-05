@@ -1,6 +1,11 @@
 #ifndef COMPRESS_H
 #define COMPRESS_H
 
-void rle_compress(const char* input, char* output);
+typedef struct {
+    char ch;
+    int count;
+} Token;
+
+int rle_compress_tokens(const char* input, int start, int end, Token* tokens);
 
 #endif
