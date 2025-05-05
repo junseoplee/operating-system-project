@@ -9,7 +9,7 @@
 #include "compress.h"
 
 #define MAX_INPUT_SIZE 100000
-#define MAX_OUTPUT_SIZE 200000
+#define MAX_TOKENS 10000
 
 double get_time_diff(struct timeval start, struct timeval end) {
     return (end.tv_sec - start.tv_sec) + (end.tv_usec - start.tv_usec) / 1000000.0;
@@ -34,21 +34,18 @@ int main(int argc, char* argv[]) {
     char* input = malloc(MAX_INPUT_SIZE);
     fread(input, sizeof(char), MAX_INPUT_SIZE, in);
     fclose(in);
-
     int input_len = strlen(input);
     int block_size = input_len / num_processes;
 
-    // 공유 메모리 할당
-    int* count = mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE,
-                      MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-    *count = 0;
+    Token** token_buffers = mmap(NULL, sizeof(Token*) * num_processes, PROT_READ | PROT_WRITE,
+                                 MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    int* token_counts = mmap(NULL, sizeof(int) * num_processes, PROT_READ | PROT_WRITE,
+                             MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 
-    // 결과 버퍼: 프로세스별 개별 버퍼
-    char** outputs = mmap(NULL, sizeof(char*) * num_processes, PROT_READ | PROT_WRITE,
-                          MAP_SHARED | MAP_ANONYMOUS, -1, 0);
     for (int i = 0; i < num_processes; i++) {
-        outputs[i] = mmap(NULL, MAX_OUTPUT_SIZE, PROT_READ | PROT_WRITE,
-                          MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+        token_buffers[i] = mmap(NULL, sizeof(Token) * MAX_TOKENS, PROT_READ | PROT_WRITE,
+                                MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+        token_counts[i] = 0;
     }
 
     struct timeval start_time, end_time;
@@ -60,15 +57,24 @@ int main(int argc, char* argv[]) {
         if (pid == 0) {
             int start_idx = i * block_size;
             int end_idx = (i == num_processes - 1) ? input_len : (i + 1) * block_size;
-
-            rle_compress_range(input, start_idx, end_idx, outputs[i]);
-            (*count)++;
+            token_counts[i] = rle_compress_tokens(input, start_idx, end_idx, token_buffers[i]);
             exit(0);
         }
     }
 
+    for (int i = 0; i < num_processes; i++) wait(NULL);
+
+    Token merged[MAX_TOKENS];
+    int merged_len = 0;
     for (int i = 0; i < num_processes; i++) {
-        wait(NULL);
+        for (int j = 0; j < token_counts[i]; j++) {
+            Token t = token_buffers[i][j];
+            if (merged_len > 0 && merged[merged_len - 1].ch == t.ch) {
+                merged[merged_len - 1].count += t.count;
+            } else {
+                merged[merged_len++] = t;
+            }
+        }
     }
 
     FILE* out = fopen(output_file, "w");
@@ -77,25 +83,23 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    for (int i = 0; i < num_processes; i++) {
-        fputs(outputs[i], out);
+    for (int i = 0; i < merged_len; i++) {
+        fprintf(out, "%c%d", merged[i].ch, merged[i].count);
     }
     fclose(out);
 
     gettimeofday(&end_time, NULL);
     getrusage(RUSAGE_SELF, &usage);
-
     printf("\n=== 성능 측정 결과 ===\n");
     printf("총 실행 시간: %.6f초\n", get_time_diff(start_time, end_time));
     printf("Voluntary Context Switches   : %ld\n", usage.ru_nvcsw);
     printf("Involuntary Context Switches : %ld\n", usage.ru_nivcsw);
-    printf("압축 성공 블록 수 (count)   : %d / %d\n", *count, num_processes);
 
-    munmap(count, sizeof(int));
-    for (int i = 0; i < num_processes; i++) {
-        munmap(outputs[i], MAX_OUTPUT_SIZE);
-    }
-    munmap(outputs, sizeof(char*) * num_processes);
     free(input);
+    for (int i = 0; i < num_processes; i++) {
+        munmap(token_buffers[i], sizeof(Token) * MAX_TOKENS);
+    }
+    munmap(token_buffers, sizeof(Token*) * num_processes);
+    munmap(token_counts, sizeof(int) * num_processes);
     return 0;
 }

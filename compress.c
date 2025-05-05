@@ -1,18 +1,28 @@
 #include <stdio.h>
 #include "compress.h"
 
-void rle_compress_range(const char* input, int start, int end, char* output) {
-    int out_index = 0;
+int rle_compress_tokens(const char* input, int start, int end, Token* tokens) {
+    if (start >= end) return 0;
+
+    int token_idx = 0;
+    char current = input[start];
     int count = 1;
 
     for (int i = start + 1; i < end; i++) {
-        if (input[i] == input[i - 1]) {
+        if (input[i] == current) {
             count++;
         } else {
-            out_index += sprintf(&output[out_index], "%c%d", input[i - 1], count);
+            tokens[token_idx].ch = current;
+            tokens[token_idx].count = count;
+            token_idx++;
+            current = input[i];
             count = 1;
         }
     }
-    out_index += sprintf(&output[out_index], "%c%d", input[end - 1], count);
-    output[out_index] = '\0';
+
+    tokens[token_idx].ch = current;
+    tokens[token_idx].count = count;
+    token_idx++;
+
+    return token_idx;
 }
