@@ -1,10 +1,9 @@
 CC=gcc
 CFLAGS=-Wall -O2 -lpthread
-OBJ=main.o compress.o
 
 all: compressor
 
-compressor: $(OBJ)
+compressor: main.o compress.o
 	$(CC) -o $@ $^ $(CFLAGS)
 
 main.o: main.c compress.h
