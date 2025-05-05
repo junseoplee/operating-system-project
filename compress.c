@@ -1,17 +1,18 @@
 #include <stdio.h>
-#include <string.h>
 #include "compress.h"
 
-void rle_compress(const char* input, char* output) {
+void rle_compress_range(const char* input, int start, int end, char* output) {
+    int out_index = 0;
     int count = 1;
-    int j = 0;
 
-    for (int i = 1; input[i - 1] != '\0'; i++) {
+    for (int i = start + 1; i < end; i++) {
         if (input[i] == input[i - 1]) {
             count++;
         } else {
-            j += sprintf(&output[j], "%c%d", input[i - 1], count);
+            out_index += sprintf(&output[out_index], "%c%d", input[i - 1], count);
             count = 1;
         }
     }
+    out_index += sprintf(&output[out_index], "%c%d", input[end - 1], count);
+    output[out_index] = '\0';
 }
