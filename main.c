@@ -24,6 +24,7 @@ typedef struct {
     int start_idx;
     int end_idx;
     int* count;
+    pthread_mutex_t* mutex;
     Token* token_array;
     int* token_count;
 } ThreadArg;
@@ -38,7 +39,11 @@ void* thread_worker(void* arg) {
 
     t->token_count[tid] = rle_compress_tokens(input, t->start_idx, t->end_idx, &t->token_array[tid * MAX_TOKENS]);
 
-    (*t->count)++;  // Race Condition 유도
+    // 🔐 동기화된 count 증가
+    pthread_mutex_lock(t->mutex);
+    (*t->count)++;
+    pthread_mutex_unlock(t->mutex);
+
     return NULL;
 }
 
@@ -70,6 +75,13 @@ int main(int argc, char* argv[]) {
                       MAP_SHARED | MAP_ANONYMOUS, -1, 0);
     *count = 0;
 
+    pthread_mutex_t* mutex = mmap(NULL, sizeof(pthread_mutex_t), PROT_READ | PROT_WRITE,
+                                  MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+    pthread_mutex_init(mutex, &attr);
+
     Token* shared_tokens = mmap(NULL, sizeof(Token) * MAX_TOKENS * total_blocks, PROT_READ | PROT_WRITE,
                                 MAP_SHARED | MAP_ANONYMOUS, -1, 0);
     int* shared_token_counts = mmap(NULL, sizeof(int) * total_blocks, PROT_READ | PROT_WRITE,
@@ -90,6 +102,7 @@ int main(int argc, char* argv[]) {
                 args[t].start_idx = block_id * block_size;
                 args[t].end_idx = (block_id == total_blocks - 1) ? input_len : (block_id + 1) * block_size;
                 args[t].count = count;
+                args[t].mutex = mutex;
                 args[t].token_array = shared_tokens;
                 args[t].token_count = shared_token_counts;
                 pthread_create(&threads[t], NULL, thread_worker, &args[t]);
@@ -105,7 +118,7 @@ int main(int argc, char* argv[]) {
         wait(NULL);
     }
 
-    // 결과 병합 및 출력
+    // 병합 및 출력
     FILE* out = fopen(output_file, "w");
     if (!out) {
         perror("출력 파일 열기 실패");
@@ -134,21 +147,21 @@ int main(int argc, char* argv[]) {
     gettimeofday(&end_time, NULL);
     getrusage(RUSAGE_SELF, &usage);
 
-    printf("\n=== 성능 측정 결과 ===\n");
+    printf("\n=== 성능 측정 결과 \n");
     printf("총 실행 시간: %.6f초\n", get_time_diff(start_time, end_time));
     printf("Voluntary Context Switches   : %ld\n", usage.ru_nvcsw);
     printf("Involuntary Context Switches : %ld\n", usage.ru_nivcsw);
     printf("압축 성공 블록 수 (count)   : %d / %d\n", *count, total_blocks);
 
-    if (*count < total_blocks) {
-        printf("Race Condition 발생 가능성 있음\n");
-    } else if (*count > total_blocks) {
-        printf("오류: count 값이 예상보다 큽니다. 동기화 문제 가능성 있음\n");
+    if (*count == total_blocks) {
+        printf("동기화 성공\n");
     } else {
-        printf("모든 블록이 정상적으로 압축됨\n");
+        printf("동기화 실패 또는 코드 오류\n");
     }
 
     free(input);
+    pthread_mutex_destroy(mutex);
+    munmap(mutex, sizeof(pthread_mutex_t));
     munmap(count, sizeof(int));
     munmap(shared_tokens, sizeof(Token) * MAX_TOKENS * total_blocks);
     munmap(shared_token_counts, sizeof(int) * total_blocks);
