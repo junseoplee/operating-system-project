@@ -134,7 +134,7 @@ int main(int argc, char* argv[]) {
     gettimeofday(&end_time, NULL);
     getrusage(RUSAGE_SELF, &usage);
 
-    printf("\n=== 성능 측정 결과 (5단계: Race Condition 실험 + 병합 적용) ===\n");
+    printf("\n=== 성능 측정 결과 ===\n");
     printf("총 실행 시간: %.6f초\n", get_time_diff(start_time, end_time));
     printf("Voluntary Context Switches   : %ld\n", usage.ru_nvcsw);
     printf("Involuntary Context Switches : %ld\n", usage.ru_nivcsw);
